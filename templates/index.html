@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Controle Bloxorz por Acelerômetro</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            text-align: center;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        #status {
+            margin: 15px;
+            padding: 10px;
+            background: #e0e0e0;
+            border-radius: 8px;
+            min-height: 60px;
+        }
+        .btn {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            margin: 8px;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        #calibrateBtn {
+            background: #2196F3;
+        }
+        #data {
+            margin: 20px auto;
+            padding: 15px;
+            background: white;
+            border-radius: 10px;
+            max-width: 90%;
+        }
+        .warning {
+            color: #F44336;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Controle Bloxorz</h1>
+    <div id="status">Pronto para conectar</div>
+    <div id="data">Aguardando calibração...</div>
+    
+    <button id="connectBtn" class="btn">Conectar</button>
+    <button id="calibrateBtn" class="btn">Calibrar Posição</button>
+
+    <div id="warning" class="warning"></div>
+
+    <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
+    <script>
+        // Elementos UI
+        const statusDiv = document.getElementById('status');
+        const dataDiv = document.getElementById('data');
+        const connectBtn = document.getElementById('connectBtn');
+        const calibrateBtn = document.getElementById('calibrateBtn');
+        const warningDiv = document.getElementById('warning');
+
+        // Estado do aplicativo
+        let socket = null;
+        let isConnected = false;
+        let isCalibrated = false;
+        let zeroPosition = { x: 0, y: 0, z: 9.8 }; // Valor padrão considerando gravidade
+        let lastAccel = { x: 0, y: 0, z: 0 };
+
+        // Inicialização
+        function init() {
+            if (!window.DeviceMotionEvent) {
+                showWarning("Seu dispositivo não suporta acelerômetro");
+                return;
+            }
+
+            connectBtn.addEventListener('click', toggleConnection);
+            calibrateBtn.addEventListener('click', calibratePosition);
+        }
+
+        // Controle de conexão
+        function toggleConnection() {
+            if (!isConnected) {
+                connectToServer();
+            } else {
+                disconnect();
+            }
+        }
+
+        function connectToServer() {
+            const serverUrl = `https://${window.location.hostname}:5000`;
+            
+            socket = io(serverUrl, {
+                reconnectionAttempts: 3,
+                transports: ['websocket']
+            });
+
+            socket.on('connect', () => {
+                isConnected = true;
+                updateUI();
+                startAccelerometer();
+            });
+
+            socket.on('disconnect', () => {
+                isConnected = false;
+                updateUI();
+            });
+
+            socket.on('connect_error', (err) => {
+                showWarning(`Erro de conexão: ${err.message}`);
+            });
+        }
+
+        function disconnect() {
+            if (socket) {
+                socket.disconnect();
+            }
+        }
+
+        // Calibração
+        function calibratePosition() {
+            if (lastAccel) {
+                zeroPosition = { ...lastAccel };
+                isCalibrated = true;
+                dataDiv.innerHTML = "Posição calibrada!<br>Incline o dispositivo para jogar.";
+            }
+        }
+
+        // Acelerômetro
+        function startAccelerometer() {
+            if (typeof DeviceMotionEvent.requestPermission === 'function') {
+                DeviceMotionEvent.requestPermission()
+                    .then(permission => {
+                        if (permission === 'granted') {
+                            setupAccelerometer();
+                        } else {
+                            showWarning("Permissão do acelerômetro negada");
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                setupAccelerometer();
+            }
+        }
+
+        function setupAccelerometer() {
+            window.addEventListener('devicemotion', handleMotion);
+            statusDiv.textContent = "Acelerômetro ativo";
+        }
+
+        function handleMotion(event) {
+            const accel = event.accelerationIncludingGravity || event.acceleration;
+            if (!accel) return;
+
+            // Suavização dos dados
+            lastAccel = {
+                x: lastAccel.x * 0.6 + accel.x * 0.4,
+                y: lastAccel.y * 0.6 + accel.y * 0.4,
+                z: lastAccel.z * 0.6 + accel.z * 0.4
+            };
+
+            // Calcula valores relativos à posição calibrada
+            const relative = {
+                x: (lastAccel.x - zeroPosition.x) * 0.5,  // Fator de sensibilidade
+                y: (lastAccel.y - zeroPosition.y) * 0.5
+            };
+
+            // Atualiza UI
+            updateAccelDisplay(relative);
+
+            // Envia dados se conectado e calibrado
+            if (isConnected && isCalibrated && socket) {
+                socket.emit('accel_data', relative);
+            }
+        }
+
+        // Atualizações UI
+        function updateUI() {
+            connectBtn.textContent = isConnected ? "Desconectar" : "Conectar";
+            statusDiv.style.color = isConnected ? "green" : "inherit";
+        }
+
+        function updateAccelDisplay(data) {
+            dataDiv.innerHTML = `
+                X: ${data.x.toFixed(2)} (${data.x > 0 ? 'Direita' : 'Esquerda'})<br>
+                Y: ${data.y.toFixed(2)} (${data.y > 0 ? 'Baixo' : 'Cima'})<br>
+                ${isCalibrated ? '✔ Calibrado' : '✖ Não calibrado'}
+            `;
+        }
+
+        function showWarning(message) {
+            warningDiv.textContent = message;
+        }
+
+        // Inicia o aplicativo
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
