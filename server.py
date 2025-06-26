@@ -1,16 +1,29 @@
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO
 import ssl
-import pyautogui
+from pynput.keyboard import Controller, Key
 import time
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'sua_chave_secreta'
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Configurações
-KEY_DELAY = 0.3  # Delay entre teclas
-THRESHOLD = 0.8  # Sensibilidade ajustada
+KEY_DELAY = 0.1  # Delay entre teclas
+THRESHOLD = 3.0  # Sensibilidade ajustada
+NEUTRAL_THRESHOLD = 1.5  # Threshold para considerar como neutro
+COOLDOWN = 0.5  # Tempo de espera após movimento
+keyboard = Controller()
+
+# Estado do controle
+last_key = None
+last_movement_time = 0
+
+KEY_MAPPING = {
+    'up': Key.up,
+    'down': Key.down,
+    'left': Key.left,
+    'right': Key.right
+}
 
 @app.route('/')
 def index():
@@ -26,23 +39,50 @@ def handle_disconnect():
 
 @socketio.on('accel_data')
 def handle_accel_data(data):
-    x, y = data.get('x', 0), data.get('y', 0)
-    print(f"X: {x}, Y: {y}")
+    global last_key, last_movement_time
     
-    # Lógica de direção com thresholds absolutos
-    if abs(x) > THRESHOLD:
-        direction = 'right' if x < 0 else 'left'
-        press_key(direction)
-    elif abs(y) > THRESHOLD:
-        direction = 'down' if y < 0 else 'up'  # Invertido para orientação natural
-        press_key(direction)
+    x, y = data.get('x', 0), data.get('y', 0)
+    current_time = time.time()
+    
+    # Verifica se estamos em cooldown
+    if current_time - last_movement_time < COOLDOWN:
+        return
+    
+    # Verifica se está em posição neutra
+    is_neutral = abs(x) < NEUTRAL_THRESHOLD and abs(y) < NEUTRAL_THRESHOLD
+    
+    # Se estava em movimento e agora está neutro, reseta
+    if last_key and is_neutral:
+        last_key = None
+        return
+    
+    # Se não está neutro e não tem movimento anterior, processa movimento
+    if not is_neutral and last_key is None:
+        if abs(x) > THRESHOLD:
+            direction = 'right' if x < 0 else 'left'
+            last_key = direction
+            press_key(direction)
+            last_movement_time = current_time
+        elif abs(y) > THRESHOLD:
+            direction = 'down' if y > 0 else 'up'
+            last_key = direction
+            press_key(direction)
+            last_movement_time = current_time
 
 def press_key(direction):
     """Simula pressionamento de tecla com feedback visual"""
     print(f"Tecla pressionada: {direction}")
-    # pyautogui.keyDown(direction)
-    time.sleep(KEY_DELAY)
-    # pyautogui.keyUp(direction)
+
+    if direction in KEY_MAPPING:
+        try:
+            key = KEY_MAPPING[direction]
+            keyboard.press(key)
+            time.sleep(KEY_DELAY)
+            keyboard.release(key)
+        except Exception as e:
+            print(f"Erro ao pressionar tecla: {e}")
+    else:
+        print(f"Direção inválida: {direction}")
 
 if __name__ == '__main__':
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
