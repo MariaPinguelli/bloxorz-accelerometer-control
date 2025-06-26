@@ -9,12 +9,12 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Configurações
 KEY_DELAY = 0.1  # Delay entre teclas
-THRESHOLD = 3.0  # Sensibilidade ajustada
+THRESHOLD = 3.0  # Sensibilidade dos movimentos
 NEUTRAL_THRESHOLD = 1.5  # Threshold para considerar como neutro
 COOLDOWN = 0.5  # Tempo de espera após movimento
 keyboard = Controller()
 
-# Estado do controle
+# Estado das teclas
 last_key = None
 last_movement_time = 0
 
@@ -44,19 +44,15 @@ def handle_accel_data(data):
     x, y = data.get('x', 0), data.get('y', 0)
     current_time = time.time()
     
-    # Verifica se estamos em cooldown
     if current_time - last_movement_time < COOLDOWN:
         return
     
-    # Verifica se está em posição neutra
     is_neutral = abs(x) < NEUTRAL_THRESHOLD and abs(y) < NEUTRAL_THRESHOLD
     
-    # Se estava em movimento e agora está neutro, reseta
     if last_key and is_neutral:
         last_key = None
         return
     
-    # Se não está neutro e não tem movimento anterior, processa movimento
     if not is_neutral and last_key is None:
         if abs(x) > THRESHOLD:
             direction = 'right' if x < 0 else 'left'
